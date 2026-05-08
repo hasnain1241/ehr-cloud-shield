@@ -1,0 +1,69 @@
+version: '3.8'
+
+# ── EHR Hybrid Cloud — Local Simulation Layers ────────────────────────────
+# Layer 2: phi-db       → Private on-premise PHI database (Tier 1 raw PHI)
+# Layer 3: compliance   → Blockchain/chaincode simulation (8 compliance rules)
+#
+# Layer 1 (AWS) is already live via Terraform — Lambda, Cognito, S3, RDS, KMS, CloudTrail.
+
+services:
+
+  # ── Private on-premise layer ─────────────────────────────────────────────
+  # Stores all Tier 1 raw PHI. No public network access.
+  phi-db:
+    image: postgres:16-alpine
+    container_name: ehr-phi-db
+    environment:
+      POSTGRES_DB:       phi_store
+      POSTGRES_USER:     phiadmin
+      POSTGRES_PASSWORD: PhiD3m0Pass!
+    ports:
+      - "5433:5432"   # 5433 on host to avoid clashing with any local Postgres
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d   # runs init.sql on first start
+      - phi_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phiadmin -d phi_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ehr-private
+
+  # ── Blockchain/chaincode simulation layer ─────────────────────────────────
+  # Node.js Express API that implements all 8 compliance rules (HC-01–04, GD-01–04).
+  # Calls the live AWS Lambda (ehr-demo-compliance-check) for step-2 role auth.
+  compliance:
+    build: ./compliance-api
+    container_name: ehr-compliance-api
+    ports:
+      - "3000:3000"
+    environment:
+      PHI_DB_HOST:      phi-db
+      PHI_DB_PORT:      5432
+      PHI_DB_NAME:      phi_store
+      PHI_DB_USER:      phiadmin
+      PHI_DB_PASS:      PhiD3m0Pass!
+      AWS_REGION:       us-east-1
+      LAMBDA_FUNCTION:  ehr-demo-compliance-check
+      # AWS credentials — picked up from the mounted credentials file below
+    volumes:
+      # Mount your local AWS credentials so the API can call Lambda
+      - ~/.aws:/root/.aws:ro
+    depends_on:
+      phi-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ehr-private
+      - ehr-public   # needs outbound internet to reach AWS
+
+volumes:
+  phi_data:
+
+networks:
+  ehr-private:
+    driver: bridge
+    internal: true    # no direct internet access — mirrors the private layer
+  ehr-public:
+    driver: bridge    # has internet access — for AWS API calls

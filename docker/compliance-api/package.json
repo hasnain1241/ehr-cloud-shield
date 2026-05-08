@@ -1,0 +1,12 @@
+{
+  "name": "ehr-compliance-api",
+  "version": "1.0.0",
+  "description": "Simulates Hyperledger Fabric chaincode compliance rules for EHR access",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.600.0",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "uuid": "^10.0.0"
+  }
+}
